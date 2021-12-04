@@ -1,0 +1,391 @@
+---
+title: "NFL Wins Pool Update"
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
+author: ""
+date: ""
+output: 
+  html_document:
+    preserve_yaml: FALSE
+---
+
+```{r setup, include=FALSE, warning = FALSE}
+
+# Instructions for GIT Upload:
+# 1) hope RStudio is still logged into GIT (don't remember password or process)
+# 2) knit document to generate HTML output
+# 3) On GIT icon on top bar, select 'Commit'
+# 4) in top-left pane, select 'index.html' (knitted html file) - usually at the bottom
+# 5) in top-right pane, type commit message (usually '[year] Week [x] update')
+# 6) click 'commit'; new window will pop up; close when process is complete
+# 7) click 'push' in top-right corner; new window will pop up; close when process is complete
+# all done
+
+knitr::opts_chunk$set(echo = TRUE)
+#library(plyr)
+#library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(rvest)
+library(formattable)
+library(knitr)
+library(kableExtra)
+library(fuzzyjoin)
+library(readxl)
+library(ggplot2)
+library(plotly)
+```
+
+```{r read files, echo= FALSE, warning = F}
+
+Draft <- read.csv("DraftResults21.csv", stringsAsFactors = F)
+Draft$Team <- factor(Draft$Team, levels = Draft$Team[1:10])
+#
+# Read NFL Standings
+url <- "http://www.espn.com/nfl/standings/_/season/2021/group/league"
+webpage <- read_html(url)
+
+teams <- webpage %>% html_nodes(".hide-mobile a") %>% html_text
+wins <- webpage %>% html_nodes(".Table__TD:nth-child(1) .stat-cell") %>% html_text %>% as.numeric()
+losses <- webpage %>% html_nodes(".Table__TD:nth-child(2) .stat-cell") %>% html_text %>% as.numeric()
+ties <- webpage %>% html_nodes(".Table__TD:nth-child(3) .stat-cell") %>% html_text %>% as.numeric()
+
+
+nfl.standings <- data.frame(Team = teams, W = wins, L = losses, T = ties) %>%
+  mutate(GP = rowSums(.[2:4]))
+
+# Determine who each team plays in current week
+
+Schedule_Key <- data.frame(Week = seq(1:22), Date = seq(from = as.Date("2021-09-07"), to = as.Date("2022-02-01"), by = 7))
+
+Current.Week <- Schedule_Key$Week[Schedule_Key$Date == max(Schedule_Key$Date[Schedule_Key$Date <= Sys.Date()])]
+
+Schedule <- read_excel("C:/Users/matth/OneDrive/Documents/Pools/WinsPool/2021-NFL-SCHEDULE.xlsx", sheet = "full size (color)", range = "A2:S34")
+
+Schedule_Long <- Schedule %>%
+  pivot_longer(cols = -NFL, names_to = "Week", values_to = "Opponent") %>%
+  rename(TEAM = NFL) %>%
+  mutate(TEAM = ifelse(TEAM == "RAM", "LAR", TEAM))
+
+Schedule_Week <- filter(Schedule_Long, Week == Current.Week) %>% arrange(TEAM)
+
+Schedule_Week$Merge <- sort(as.character(nfl.standings$Team))[c(1:16,18:19,17,20:27,29,28,30:32)]
+
+Num.Byes <- sum(Schedule_Week$Opponent == "BYE")/2
+
+# Read 538 Projections
+url.2 <- "https://projects.fivethirtyeight.com/2020-nfl-predictions/"
+webpage.2 <- read_html(url.2)
+
+# Remove 538 for when they change their projections to the 'choose your own results'
+teams.538 <- webpage.2 %>% html_nodes(".full") %>% html_text
+#proj.w <- webpage.2 %>% html_nodes(".num.div") %>% html_text
+#Projections <- data.frame(Team = as.character(teams.538), Proj.W = as.numeric(gsub("-.+$", "", proj.w))) %>%
+#  arrange(Team)
+Projections <- data.frame(Team = as.character(teams.538)) %>%
+  arrange(Team)
+
+# get order for merge
+order_db <- data.frame(Merge = sort(as.character(nfl.standings$Team)),
+                       stringsAsFactors = F) %>%
+  mutate(S = seq(1:n()),
+         Name = trimws(gsub("^.+ *( .+$)", "\\1", Merge))) %>%
+  arrange(Name)
+
+Projections$Team <- as.character(Projections$Team)
+Projections$Merge <- sort(as.character(nfl.standings$Team))[order_db$S]
+
+# Read ESPN FPI projections
+url.4 <- "https://www.espn.com/nfl/fpi/_/view/projections"
+webpage <- read_html(url.4)
+
+teams.espn <- webpage %>% html_nodes("td:nth-child(1)") %>% html_text
+teams.espn <- teams.espn[1:32]
+
+record <- webpage %>% html_nodes("td:nth-child(2)") %>% html_text
+espn.wins <- as.numeric(gsub("-.+$", "", record))
+
+Projections.espn <- data.frame(Merge = as.character(teams.espn), Proj.W = espn.wins) %>% arrange(Merge)
+Projections.espn$Merge <- as.character(Projections.espn$Merge)
+
+Merge.Key <- data.frame(Short = sort(Schedule_Week$TEAM)[c(1:16,19,17:18,20:27,29,28,30:32)], 
+                        Abbrev = Projections %>% arrange(Merge) %>% pull(Team),
+                        Full = sort(Projections$Merge)) %>%
+  mutate(First = trimws(gsub("(^.+ *) .+$", "\\1", Full)))
+
+
+# Read vegas odds
+url.3 <- "http://www.vegasinsider.com/nfl/odds/las-vegas/2"
+webpage.3 <- read_html(url.3)
+
+odds_tbl <- webpage.3 %>% html_nodes(".frodds-data-tbl") %>% html_table()
+odds <- odds_tbl[[1]][,2]
+odds <- gsub("½", ".5", odds)
+
+odds_clean <- data.frame(raw = odds) %>%
+  mutate(Game.Num = seq(1:n()),
+         Fav = ifelse(substr(raw, 1, 1) %in% c("-", "P"), "Road", "Home"),
+         raw = gsub("PK", "-0", raw),
+         raw = ifelse(Fav == "Home", gsub("EV", "-0", raw), raw),
+         Spread = ifelse(Fav == "Road", as.numeric(gsub("(^.+)[[:space:]].+$", "\\1", raw)), as.numeric(gsub("^[^-]*-[^-]*(-[^ ]*)[[:space:]]-.*$", "\\1", raw))*-1),
+         Spread.2 = Spread * -1) %>%
+  filter(Game.Num <= 16-Num.Byes) %>%
+  gather("Team", "Spread", Spread:Spread.2) %>%
+  arrange(Game.Num, Team)
+
+teams.vegas <- webpage.3 %>% html_nodes(".tabletext") %>% html_text
+
+Spreads <- data.frame(Team = teams.vegas[1:(2*(16-Num.Byes))], Spread = odds_clean$Spread) %>%
+  mutate(Prob = 1-round(1/(10^((25*Spread)*-1/400)+1),2)) %>%
+  left_join(Merge.Key[,3:4] %>%
+              mutate(First = case_when(
+                grepl("New York", First) ~ gsub("New York", "N.Y.", Full),
+                grepl("Los Angeles", First) ~ gsub("Los Angeles", "L.A.", Full),
+                T ~ First
+              )), by = c("Team" = "First"))
+#  left_join(Projections[,c(1,2)], by = "Team")
+
+t <- format(Sys.Date(), "%B %d, %Y")
+
+```
+
+Last updated `r t`
+
+## Standings
+
+```{r echo = F, warning=F}
+pool.standings <- left_join(Draft[,3:4], nfl.standings, by = c("Selection" = "Team")) %>%
+  left_join(Projections.espn[,1:2], by = c("Selection" = "Merge")) %>%
+#  left_join(Projections[,2:3], by = c("Selection" = "Merge")) %>%
+  arrange(Selection) %>%
+  group_by(Team) %>%
+  summarise_at(vars(-Selection), funs(sum)) %>%
+  mutate(Rank = rank(-W, ties.method = "min"),
+         Games.Left = 48 - GP,
+         W.Pct = percent(W/GP, digits = 1),
+         W.Pct.Rk = rank(-W.Pct, ties.method = "min"),
+         Proj.Rank_FPI = rank(-Proj.W, ties.method = "min"),
+#         Proj.Rank_538 = rank(-Proj.W.y, ties.method = "min")
+         ) %>%
+  arrange(Rank) %>%
+  select(Rank, Team, W, Games.Left, W.Pct, W.Pct.Rk, Proj.W, Proj.Rank_FPI, #Proj.Rank_538
+         ) %>%
+#  select(Rank, Team, W, Games.Left, W.Pct) %>%
+  rename(Wins = W) 
+
+pool.standings %>%
+  kable(col.names = c("Rank", "Team", "Wins", "Remaining Games", "Win %", "Win % Rank", "Projected Wins (FPI)", "Projected Rank (FPI)"), 
+        align = "c") %>%
+#  kable(col.names = c("Rank", "Team", "Wins", "Remaining Games", "Win %"), align = "c") %>%
+  kable_styling(bootstrap_options = c("hover","condensed", "responsive"), full_width = F)
+
+
+  
+
+```
+
+* Projected wins taken from [ESPN FPI projections](https://www.espn.com/nfl/fpi/_/view/projections).
+
+## Expanded Standings
+
+```{r echo = F, warning = F}
+
+expanded.standings <- left_join(nfl.standings[, 1:2], Draft[, 3:4], by = c("Team" = "Selection")) %>%
+  rename(Picker = Team.y) %>%
+  mutate(Picker = as.character(Picker)) %>%
+  filter(!is.na(Picker)) %>%
+  left_join(Spreads[, 3:4], by = c("Team" = "Full")) %>%
+  left_join(Schedule_Week[, 3:4], by = c("Team" = "Merge")) %>%
+  left_join(pool.standings[, 2:3], by = c("Picker" = "Team")) %>%
+  left_join(Projections.espn, by = c("Team" = "Merge")) %>%
+  arrange(desc(Wins), Picker, desc(W), Team)
+
+Pool.Order <- unique(expanded.standings$Picker)
+
+names_broken <- c("Team", "Wins","Projected<br/>Wins" ,"Next<br/>Opponent", "Win Probability<br/>in Next Game")
+
+expanded.standings %>%
+  select(Team, W, Proj.W, Opponent, Prob) %>%
+  mutate(Prob = ifelse(is.na(Prob), "", Prob)) %>%
+  kable(col.names = names_broken, escape = F) %>%
+  kable_styling(bootstrap_options = c("hover"), full_width = F, position = "left") %>%
+  group_rows(Pool.Order[1], 1,3) %>%
+  group_rows(Pool.Order[2], 4,6) %>%
+  group_rows(Pool.Order[3], 7,9) %>%
+  group_rows(Pool.Order[4], 10,12) %>%
+  group_rows(Pool.Order[5], 13,15) %>%
+  group_rows(Pool.Order[6], 16,18) %>%
+  group_rows(Pool.Order[7], 19,21) %>%
+  group_rows(Pool.Order[8], 22,24) %>%
+  group_rows(Pool.Order[9], 25,27) %>%
+  group_rows(Pool.Order[10], 28,30) 
+
+#%>%
+#  scroll_box(width = "100%", height = "200px")
+```
+
+* Win probability calculated from [consensus vegas point spreads](http://www.vegasinsider.com/nfl/odds/las-vegas/?s=666)
+
+## Weekly Head-to-Heads
+
+```{r H2H, echo = F, warning=F}
+First_Place <- max(pool.standings$Wins)
+Third_Place <- pool.standings$Wins[3]
+
+# fix road team for london game
+# > none for 2020; keeping code for the future
+#Schedule_Long$Opponent[Schedule_Long$TEAM == "CAR" & Schedule_Long$Week == 6] <- "@TB"
+#Schedule_Long$Opponent[Schedule_Long$Opponent == "LAR" & Schedule_Long$Week == 8] <- "@LAR"
+#Schedule_Long$Opponent[Schedule_Long$Opponent == "LAC" & Schedule_Long$Week == 11] <- "@LAC"
+
+#Matchups <- Schedule_Long %>%
+#  filter(Week == Current.Week,
+#         grepl("@", Opponent)) %>%
+#  select(-Week) %>%
+#  mutate(Opponent = gsub("@", "", Opponent),
+#         Game = seq(1:n())) %>%
+#  rename(Away = TEAM,
+#         Home = Opponent) %>%
+#  gather("Location", "Team", Away:Home) %>%
+#  mutate(Team = ifelse(Team == "RAM", "LAR", Team)) %>%
+#  left_join(Merge.Key[,c(1,3)], by = c("Team" = "Short")) %>%
+#  left_join(Draft[,c(3,4)] %>% rename("Person" = "Team"), by = c("Full" = "Selection")) %>%
+#  left_join(pool.standings[, c(2:3)] %>% rename("Person" = "Team"), by ="Person") %>%
+#  left_join(Spreads[, c(3,4)], by = "Full") %>%
+#  select(-Full) %>%
+#  unite("temp", Team,Person,Wins,Prob, sep = "-") %>%
+#  spread(Location, temp) %>%
+#  separate(Home, c("Home", "Home_Person", "Home_Wins", "Home_Prob"), sep = "-") %>%
+#  separate(Away, c("Away", "Away_Person", "Away_Wins", "Away_Prob"), sep = "-") %>%
+#  mutate_at(vars(Home_Wins, Home_Prob, Away_Wins, Away_Prob), funs(as.numeric(.))) %>%
+#  mutate_at(vars(Home_Wins, Away_Wins), funs(ifelse(is.na(.), min(pool.standings$Wins), .))) %>%
+#  rowwise() %>%
+#  mutate(Rank.Rating_First = (First_Place - Home_Wins) + (First_Place - Away_Wins),
+#         Rank.Rating_Money = (max(0, Third_Place - Home_Wins, na.rm = T) + max(0, Third_Place - #Away_Wins, na.rm = T)),
+#         Prob.Rating = max(Home_Prob, Away_Prob)) %>%
+#  ungroup() %>%
+#  arrange(Rank.Rating_First, Rank.Rating_Money, Prob.Rating) %>%
+#  mutate(Leverage.Score = 1:n(),
+#         Output = paste0("(", Away_Person,") ", Away, " @ ", Home, " (", Home_Person,")"),
+#         At = "@") %>%
+#  select(Home_Person, Home, At, Away, Away_Person, Leverage.Score) %>%
+#  mutate_at(vars(Away_Person, Home_Person), funs(ifelse(. == "NA", "", .))) %>%
+#  filter(Home_Person != Away_Person)
+#
+#colfunc <- colorRampPalette(c("red", "white"))
+
+#Matchups %>%
+#  mutate(
+#    Indicator.Cell = "ReallyLongName",
+#    Indicator.Cell = cell_spec(
+#    Indicator.Cell, color = colfunc(nrow(Matchups)), 
+#    background = colfunc(nrow(Matchups))
+#  )) %>%
+#  select(-Leverage.Score) %>%
+#    kable(col.names = c("Person", "Team", "", "Team", "Person", "Leverage"), escape = F) %>%
+#  kable_styling(bootstrap_options = c("hover"), full_width = F, position = "left")
+
+matchup_db <- Schedule_Long %>%
+  filter(Week == Current.Week,
+         grepl("@", Opponent)) %>%
+  select(-Week) %>%
+  mutate(Opponent = gsub("@", "", Opponent),
+         Game = seq(1:n())) %>%
+  rename(Away = TEAM,
+         Home = Opponent) %>%
+  gather("Location", "Team", Away:Home) %>%
+  mutate(Team = ifelse(Team == "RAM", "LAR", Team)) %>%
+  left_join(Merge.Key[,c(1,3)], by = c("Team" = "Short")) %>%
+  left_join(Draft[,c(3,4)] %>% rename("Person" = "Team"), by = c("Full" = "Selection")) %>%
+  left_join(pool.standings[, c(2:3)] %>% rename("Person" = "Team"), by ="Person") %>%
+  left_join(Spreads[, c(3,4)], by = "Full") %>%
+  select(-Full) %>%
+  unite("temp", Team,Person,Wins,Prob, sep = "-") %>%
+  spread(Location, temp) %>%
+  separate(Home, c("Home", "Home_Person", "Home_Wins", "Home_Prob"), sep = "-") %>%
+  separate(Away, c("Away", "Away_Person", "Away_Wins", "Away_Prob"), sep = "-") %>%
+  mutate_at(vars(Home_Wins, Home_Prob, Away_Wins, Away_Prob), funs(as.numeric(.))) %>%
+  mutate_at(vars(Home_Wins, Away_Wins), funs(ifelse(is.na(.), min(pool.standings$Wins), .))) %>%
+  mutate(across(.cols = c(Home_Wins, Away_Wins), .fns = ~ First_Place - .)) %>%
+  group_by(Game) %>%
+  mutate(min_prob = min(Home_Prob, Away_Prob),
+         label = glue::glue("{Away} ({Away_Person}) @ {Home} ({Home_Person}) - {min_prob*100}%"))
+
+p <- ggplot(matchup_db, aes(x = Home_Wins, y = Away_Wins, size = min_prob, text = label)) +
+  geom_point(position = position_jitter(width = 0.1, height = 0.1), shape = 21, color = "red", fill = "blue", alpha = 0.25) +
+  scale_x_reverse(name = "Player 1 distance from 1st place") +
+  scale_y_reverse(name = "Player 2 distance from 1st place")
+
+ggplotly(p, tooltip = "label")
+
+```
+Leverage measured by:  
+* Circles to the top right are games between people closest to first place  
+* Bigger circles indicate games that are more likely to be closely contested
+
+## Draft Analysis
+
+```{r echo = F, warning = F}
+full.standings <- left_join(nfl.standings[, 1:2], Draft[, 2:4], by = c("Team" = "Selection")) %>%
+  rename(Picker = Team.y) %>%
+  mutate(Picker = as.character(Picker))
+
+full.standings$Pick[is.na(full.standings$Pick)] <- c(31,32)
+full.standings$Picker[is.na(full.standings$Picker)] <- "Not Picked"
+
+pool.rosters <- left_join(Draft, nfl.standings, by = c("Selection" = "Team")) %>%
+  mutate(Exp.W = nfl.standings$W[Pick],
+         PvE = W - Exp.W) %>%
+  group_by(Team) %>%
+  mutate(Total = sum(W)) %>%
+  rowwise() %>%
+  mutate(better.pick = sum(full.standings$Pick[full.standings$Picker != Team] > Pick & full.standings$W[full.standings$Picker != Team] > W)) %>%
+  arrange(desc(Total), Team, Pick)
+
+
+names_broken <- c("Team", "Wins", "Draft<br/>Spot", "Expected<br/>Wins", "Performance vs.<br/>Expectation", "Better<br/>Choices")
+
+pool.rosters %>%
+  ungroup() %>%
+  select(Selection, W, Pick, Exp.W, PvE, better.pick) %>%
+  kable(col.names = names_broken, escape = F) %>%
+  kable_styling(bootstrap_options = c("hover"), full_width = F, position = "left") %>%
+  group_rows(pool.standings$Team[1], 1,3) %>%
+  group_rows(pool.standings$Team[2], 4,6) %>%
+  group_rows(pool.standings$Team[3], 7,9) %>%
+  group_rows(pool.standings$Team[4], 10,12) %>%
+  group_rows(pool.standings$Team[5], 13,15) %>%
+  group_rows(pool.standings$Team[6], 16,18) %>%
+  group_rows(pool.standings$Team[7], 19,21) %>%
+  group_rows(pool.standings$Team[8], 22,24) %>%
+  group_rows(pool.standings$Team[9], 25,27) %>%
+  group_rows(pool.standings$Team[10], 28,30)
+
+
+
+```
+
+
+
+## Draft Results
+
+```{r draft, echo=FALSE}
+graph_data <- full.standings %>%
+  select(Picker, Team, W, Pick)
+
+graph_data$Picker <- factor(graph_data$Picker, levels = c(as.character(Draft$Team[1:10]), "Not Picked"))
+
+ggplot(graph_data, aes(x = Picker, y = Pick)) + 
+  geom_point() +
+  geom_text(aes(label = Team, color = W), size = 3, hjust = 0, nudge_x = 0.15) + 
+  scale_y_reverse(name = "Overall Selection", breaks = c(1,10,20,30)) +
+  scale_color_gradient(name = "Wins", low = "red", high = "darkblue")+
+  coord_cartesian(xlim = c(0.75,14)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
