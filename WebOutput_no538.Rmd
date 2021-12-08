@@ -123,14 +123,16 @@ webpage.3 <- read_html(url.3)
 
 odds_tbl <- webpage.3 %>% html_nodes(".frodds-data-tbl") %>% html_table()
 odds <- odds_tbl[[1]][,2]
-odds <- gsub("½", ".5", odds)
+odds <- sapply(odds, function(x) gsub("½", ".5", x))
 
-odds_clean <- data.frame(raw = odds) %>%
+odds_clean <- data.frame(raw = odds[,1]) %>%
   mutate(Game.Num = seq(1:n()),
          Fav = ifelse(substr(raw, 1, 1) %in% c("-", "P"), "Road", "Home"),
          raw = gsub("PK", "-0", raw),
+         raw = gsub("EV", "-00", raw),
+         raw = gsub("[^0-9u.-]", "P", raw),
          raw = ifelse(Fav == "Home", gsub("EV", "-0", raw), raw),
-         Spread = ifelse(Fav == "Road", as.numeric(gsub("(^.+)[[:space:]].+$", "\\1", raw)), as.numeric(gsub("^[^-]*-[^-]*(-[^ ]*)[[:space:]]-.*$", "\\1", raw))*-1),
+         Spread = ifelse(Fav == "Road", as.numeric(gsub("(^.+)P.+$", "\\1", raw)), as.numeric(gsub("^[^-]*-[^-]*(-[^ ]*)P-.*$", "\\1", raw))*-1),
          Spread.2 = Spread * -1) %>%
   filter(Game.Num <= 16-Num.Byes) %>%
   gather("Team", "Spread", Spread:Spread.2) %>%
