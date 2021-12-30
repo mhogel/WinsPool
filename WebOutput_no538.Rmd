@@ -166,7 +166,7 @@ pool.standings <- left_join(Draft[,3:4], nfl.standings, by = c("Selection" = "Te
   group_by(Team) %>%
   summarise_at(vars(-Selection), funs(sum)) %>%
   mutate(Rank = rank(-W, ties.method = "min"),
-         Games.Left = 48 - GP,
+         Games.Left = 51 - GP,
          W.Pct = percent(W/GP, digits = 1),
          W.Pct.Rk = rank(-W.Pct, ties.method = "min"),
          Proj.Rank_FPI = rank(-Proj.W, ties.method = "min"),
