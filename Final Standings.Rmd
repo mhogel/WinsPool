@@ -1,0 +1,167 @@
+---
+title: "NFL Wins Pool - Final Standings"
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
+author: ""
+date: ""
+output: 
+  html_document:
+    preserve_yaml: FALSE
+---
+
+```{r setup, include=FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#library(plyr)
+#library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(rvest)
+library(formattable)
+library(knitr)
+library(kableExtra)
+library(fuzzyjoin)
+library(readxl)
+```
+
+```{r read files, echo= FALSE, warning = F}
+
+Draft <- read.csv("DraftResults21.csv", stringsAsFactors = F)
+Draft$Team <- factor(Draft$Team, levels = Draft$Team[1:10])
+#
+# Read NFL Standings
+url <- "http://www.espn.com/nfl/standings/_/season/2021/group/league"
+webpage <- read_html(url)
+
+teams <- webpage %>% html_nodes(".hide-mobile a") %>% html_text
+wins <- webpage %>% html_nodes(".Table__TD:nth-child(1) .stat-cell") %>% html_text %>% as.numeric()
+losses <- webpage %>% html_nodes(".Table__TD:nth-child(2) .stat-cell") %>% html_text %>% as.numeric()
+ties <- webpage %>% html_nodes(".Table__TD:nth-child(3) .stat-cell") %>% html_text %>% as.numeric()
+
+
+nfl.standings <- data.frame(Team = teams, W = wins, L = losses, T = ties) %>%
+  mutate(GP = rowSums(.[2:4]))
+
+
+```
+
+
+## Standings
+
+```{r echo = F, warning=F}
+pool.standings <- left_join(Draft[,3:4], nfl.standings, by = c("Selection" = "Team")) %>%
+  arrange(Selection) %>%
+  group_by(Team) %>%
+  summarise_at(vars(-Selection), funs(sum)) %>%
+  mutate(Rank = rank(-W, ties.method = "min"),
+         Games.Left = 48 - GP,
+         W.Pct = percent(W/GP, digits = 1),
+         W.Pct.Rk = rank(-W.Pct, ties.method = "min")) %>%
+  arrange(Rank) %>%
+  select(Rank, Team, W) %>%
+  rename(Wins = W)
+
+pool.standings %>%
+  kable(col.names = c("Rank", "Team", "Wins"), align = "c") %>%
+#  kable(col.names = c("Rank", "Team", "Wins", "Remaining Games", "Win %"), align = "c") %>%
+  kable_styling(bootstrap_options = c("hover","condensed", "responsive"), position = "left", full_width = F)
+
+```
+
+## Expanded Standings
+
+```{r echo = F, warning = F}
+
+expanded.standings <- left_join(nfl.standings[, 1:2], Draft[, 3:4], by = c("Team" = "Selection")) %>%
+  rename(Picker = Team.y) %>%
+  mutate(Picker = as.character(Picker)) %>%
+  filter(!is.na(Picker)) %>%
+  left_join(pool.standings[, 2:3], by = c("Picker" = "Team")) %>%
+  arrange(desc(Wins), Picker, desc(W), Team)
+
+Pool.Order <- unique(expanded.standings$Picker)
+
+names_broken <- c("Team", "Wins")
+
+expanded.standings %>%
+  select(Team, W) %>%
+  kable(col.names = names_broken, escape = F) %>%
+  kable_styling(bootstrap_options = c("hover"), full_width = F, position = "left") %>%
+  group_rows(Pool.Order[1], 1,3) %>%
+  group_rows(Pool.Order[2], 4,6) %>%
+  group_rows(Pool.Order[3], 7,9) %>%
+  group_rows(Pool.Order[4], 10,12) %>%
+  group_rows(Pool.Order[5], 13,15) %>%
+  group_rows(Pool.Order[6], 16,18) %>%
+  group_rows(Pool.Order[7], 19,21) %>%
+  group_rows(Pool.Order[8], 22,24) %>%
+  group_rows(Pool.Order[9], 25,27) %>%
+  group_rows(Pool.Order[10], 28,30) 
+
+#%>%
+#  scroll_box(width = "100%", height = "200px")
+```
+
+## Draft Analysis
+
+```{r echo = F, warning = F}
+full.standings <- left_join(nfl.standings[, 1:2], Draft[, 2:4], by = c("Team" = "Selection")) %>%
+  rename(Picker = Team.y) %>%
+  mutate(Picker = as.character(Picker))
+
+full.standings$Pick[is.na(full.standings$Pick)] <- c(31,32)
+full.standings$Picker[is.na(full.standings$Picker)] <- "Not Picked"
+
+pool.rosters <- left_join(Draft, nfl.standings, by = c("Selection" = "Team")) %>%
+  mutate(Exp.W = nfl.standings$W[Pick],
+         PvE = W - Exp.W) %>%
+  group_by(Team) %>%
+  mutate(Total = sum(W)) %>%
+  rowwise() %>%
+  mutate(better.pick = sum(full.standings$Pick[full.standings$Picker != Team] > Pick & full.standings$W[full.standings$Picker != Team] > W)) %>%
+  arrange(desc(Total), Team, Pick)
+
+
+names_broken <- c("Team", "Wins", "Draft<br/>Spot", "Expected<br/>Wins", "Performance vs.<br/>Expectation", "Better<br/>Choices")
+
+pool.rosters %>%
+  ungroup() %>%
+  select(Selection, W, Pick, Exp.W, PvE, better.pick) %>%
+  kable(col.names = names_broken, escape = F) %>%
+  kable_styling(bootstrap_options = c("hover"), full_width = F, position = "left") %>%
+  group_rows(pool.standings$Team[1], 1,3) %>%
+  group_rows(pool.standings$Team[2], 4,6) %>%
+  group_rows(pool.standings$Team[3], 7,9) %>%
+  group_rows(pool.standings$Team[4], 10,12) %>%
+  group_rows(pool.standings$Team[5], 13,15) %>%
+  group_rows(pool.standings$Team[6], 16,18) %>%
+  group_rows(pool.standings$Team[7], 19,21) %>%
+  group_rows(pool.standings$Team[8], 22,24) %>%
+  group_rows(pool.standings$Team[9], 25,27) %>%
+  group_rows(pool.standings$Team[10], 28,30)
+```
+
+
+
+## Draft Results
+
+```{r draft, echo=FALSE}
+graph_data <- full.standings %>%
+  select(Picker, Team, W, Pick)
+
+graph_data$Picker <- factor(graph_data$Picker, levels = c(as.character(Draft$Team[1:10]), "Not Picked"))
+
+ggplot(graph_data, aes(x = Picker, y = Pick)) + 
+  geom_point() +
+  geom_text(aes(label = Team, color = W), size = 3, hjust = 0, nudge_x = 0.15) + 
+  scale_y_reverse(name = "Overall Selection", breaks = c(1,10,20,30)) +
+  scale_color_gradient(name = "Wins", low = "red", high = "darkblue")+
+  coord_cartesian(xlim = c(0.75,14)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
