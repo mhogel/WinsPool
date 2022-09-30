@@ -25,8 +25,7 @@ output:
 # all done
 
 knitr::opts_chunk$set(echo = TRUE)
-#library(plyr)
-#library(tidyverse)
+
 library(dplyr)
 library(tidyr)
 library(rvest)
@@ -62,6 +61,7 @@ nfl.standings <- data.frame(Team = teams, W = wins, L = losses, T = ties) %>%
 Schedule_Key <- data.frame(Week = seq(1:22), Date = seq(from = as.Date("2022-09-08"), to = as.Date("2023-02-02"), by = 7))
 
 Current.Week <- Schedule_Key$Week[Schedule_Key$Date == max(Schedule_Key$Date[Schedule_Key$Date <= Sys.Date()])] + 1
+Current.Week <- 4
 
 Schedule <- read.csv("C:/Users/matth/OneDrive/Documents/Gambling/Football/NFL Schedule_2022.csv")
 
@@ -83,9 +83,7 @@ webpage.2 <- read_html(url.2)
 
 # Remove 538 for when they change their projections to the 'choose your own results'
 teams.538 <- webpage.2 %>% html_nodes(".full") %>% html_text
-#proj.w <- webpage.2 %>% html_nodes(".num.div") %>% html_text
-#Projections <- data.frame(Team = as.character(teams.538), Proj.W = as.numeric(gsub("-.+$", "", proj.w))) %>%
-#  arrange(Team)
+
 Projections <- data.frame(Team = as.character(teams.538)) %>%
   arrange(Team)
 
