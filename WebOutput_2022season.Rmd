@@ -59,9 +59,8 @@ nfl.standings <- data.frame(Team = teams, W = wins, L = losses, T = ties) %>%
 # Determine who each team plays in current week
 
 Schedule_Key <- data.frame(Week = seq(1:22), Date = seq(from = as.Date("2022-09-08"), to = as.Date("2023-02-02"), by = 7))
+Current.Week <- Schedule_Key %>% filter(Date >= Sys.Date()) %>% slice(1) %>% pull(Week) 
 
-Current.Week <- Schedule_Key$Week[Schedule_Key$Date == max(Schedule_Key$Date[Schedule_Key$Date <= Sys.Date()])] + 1
-Current.Week <- 4
 
 Schedule <- read.csv("C:/Users/matth/OneDrive/Documents/Gambling/Football/NFL Schedule_2022.csv")
 
@@ -117,18 +116,18 @@ Merge.Key <- data.frame(Short = sort(Schedule_Week$TEAM)[c(1:16,18:19,17,20:32)]
 
 
 # Read vegas odds
-url <- paste0("https://www.covers.com/nfl/week-",Current.Week,"-odds")
+url <- paste0("https://www.thelines.com/nfl-week-",Current.Week,"-odds-2022/")
 
-tmp <- url %>% read_html() %>% html_table()
+tmp <- url %>% read_html() %>% html_table() %>% as.data.frame() %>% select(2) %>% setNames("raw")
 
-lines <- data.frame(tmp[[1]]) %>%
-  mutate(across(.cols = c("Spread", "Matchup"), .fns = ~ gsub("49", "FortyNin", .x)),
-         home = gsub("^.+ at (.+$)", "\\1", Matchup),
-         away = gsub("(^.+) at.+$", "\\1", Matchup),
-         line = as.numeric(trimws(gsub("[[:alpha:]]", "", Spread))) * -1,
-         Prob = 1-round(1/(10^((25*line)*-1/400)+1),2),
-         across(.cols = c("home", "away"), .fns = ~ gsub("FortyNin", "49", .x))) %>%
-  select(away, home, line, Prob) 
+lines <- tmp %>%
+  mutate(raw = gsub("49", "FortyNin", raw),         
+    home = gsub("^.+ at (.+) .+$", "\\1", raw),
+                  away = gsub("(^[[:alpha:]]+) .+$", "\\1", raw),
+                  line = as.numeric(gsub("^[[:alpha:]]* ([[:punct:]].*) at .+$", "\\1", raw)),
+    Prob = 1-round(1/(10^((25*line)*-1/400)+1),2),
+    across(.cols = c("home", "away"), .fns = ~ gsub("FortyNin", "49", .x))) %>%
+  select(away, home, line, Prob)
 
 Spreads <- rbind(
   lines %>% select(Team = away, Prob),
