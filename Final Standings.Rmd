@@ -29,11 +29,11 @@ library(readxl)
 
 ```{r read files, echo= FALSE, warning = F}
 
-Draft <- read.csv("DraftResults21.csv", stringsAsFactors = F)
+Draft <- read.csv("DraftResults22.csv", stringsAsFactors = F)
 Draft$Team <- factor(Draft$Team, levels = Draft$Team[1:10])
 #
 # Read NFL Standings
-url <- "http://www.espn.com/nfl/standings/_/season/2021/group/league"
+url <- "http://www.espn.com/nfl/standings/_/season/2022/group/league"
 webpage <- read_html(url)
 
 teams <- webpage %>% html_nodes(".hide-mobile a") %>% html_text

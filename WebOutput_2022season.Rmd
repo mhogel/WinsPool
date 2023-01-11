@@ -8,7 +8,7 @@ knit: (function(input_file, encoding) {
 author: ""
 date: ""
 params:
-  week: 15
+  week: 18
 output: 
   html_document:
     preserve_yaml: FALSE
