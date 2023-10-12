@@ -8,7 +8,7 @@ knit: (function(input_file, encoding) {
 author: ""
 date: ""
 params:
-  week: 2
+  week: 6
 output: 
   html_document:
     preserve_yaml: FALSE
@@ -69,9 +69,14 @@ Schedule_Week <- rbind(
   Schedule %>% select(TEAM = home_team, Opponent = away_team, spread = spread_line),
   Schedule %>% mutate(spread_line = spread_line * -1) %>% select(TEAM = away_team, Opponent = home_team, spread = spread_line)
 ) %>%
-  arrange(TEAM)
+  arrange(TEAM) %>%
+  left_join(
+    nflreadr::load_teams() %>%
+      select(team_abbr, Merge = team_name),
+    by = c("TEAM" = "team_abbr")
+  )
 
-Schedule_Week$Merge <- sort(as.character(nfl.standings$Team))[c(1:16,19, 18,17,20:27,29,28,30:32)]
+#Schedule_Week$Merge <- sort(as.character(nfl.standings$Team))[c(1:16,19, #18,17,20:27,29,28,30:32)]
 
 Num.Byes <- sum(Schedule_Week$Opponent == "BYE")/2
 
@@ -250,15 +255,13 @@ matchup_db <- Schedule %>%
   mutate(Game = seq(1:n())) %>%
   select(Game, Away = away_team, Home = home_team, spread = spread_line) %>%
   gather("Location", "Team", Away:Home) %>%
-  left_join(Merge.Key[,c(1,3)] %>% mutate(Short = case_when(
-    Short == "LA" ~ "LAC",
-    Short == "LAC" ~ "LA",
-    T ~ Short
-  )), by = c("Team" = "Short")) %>%
-  left_join(Draft[,c(3,4)] %>% rename("Person" = "Team"), by = c("Full" = "Selection")) %>%
+  left_join(nflreadr::load_teams() %>%
+              select(team_abbr, team_name),
+            by = c("Team" = "team_abbr")) %>%
+  left_join(Draft[,c(3,4)] %>% rename("Person" = "Team"), by = c("team_name" = "Selection")) %>%
   left_join(pool.standings[, c(2:3)] %>% rename("Person" = "Team"), by ="Person") %>%
   mutate(Prob = 1-round(1/(10^((25*spread)/400)+1),2)) %>%
-  select(-Full) %>%
+  select(-team_name) %>%
   unite("temp", Team,Person,Wins,Prob, sep = "-") %>%
   spread(Location, temp) %>%
   separate(Home, c("Home", "Home_Person", "Home_Wins", "Home_Prob"), sep = "-") %>%
