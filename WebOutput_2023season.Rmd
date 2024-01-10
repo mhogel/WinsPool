@@ -8,7 +8,7 @@ knit: (function(input_file, encoding) {
 author: ""
 date: ""
 params:
-  week: 6
+  week: 18
 output: 
   html_document:
     preserve_yaml: FALSE
@@ -30,6 +30,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 library(dplyr)
 library(tidyr)
+library(forcats)
 library(rvest)
 library(formattable)
 library(knitr)
@@ -284,6 +285,61 @@ ggplotly(p, tooltip = "label")
 Leverage measured by:  
 * Circles to the top right are games between people closest to first place  
 * Bigger circles indicate games that are more likely to be closely contested
+
+## Strength of Schedule in the coming weeks
+
+```{r sos, echo = F, warning = F}
+
+team_list <- Draft %>%
+  left_join(nflreadr::load_teams() %>%
+              select(team_abbr, team_name),
+            by = c("Selection" = "team_name")) %>%
+  select(Team, team_abbr)
+  
+
+sched_upcoming <- nflreadr::load_schedules(seasons = 2023) %>% 
+  filter(between(week, params$week, min(params$week + 3, max(week)))) %>%
+  nflreadr::clean_homeaway() %>%
+  select(game_id, week, team, opponent) %>%
+  left_join(nflreadr::load_teams() %>%
+              select(team_abbr, team_name),
+            by = c("opponent" = "team_abbr")) %>%
+  left_join(Projections.espn, by = c("team_name" = "Merge")) %>%
+  select(game_id, week, team, opponent, Proj.W) %>%
+  left_join(nflreadr::load_teams() %>%
+              select(team_abbr, team_name),
+            by = c("team" = "team_abbr")) %>%
+  left_join(Draft[,c(1,3,4)] %>% rename("Person" = "Team"), by = c("team_name" = "Selection")) %>%
+  filter(!is.na(Person)) %>%
+  select(Person, team, Round, week, opponent, Proj.W) %>%
+  rowwise() %>%
+  mutate(self_game = opponent %in% team_list$team_abbr[team_list$Team == Person]) %>%
+  group_by(Person) %>%
+  mutate(self_games = sum(self_game) / 2) %>%
+  filter(!self_game) %>%
+  mutate(avg_sos = median(Proj.W),
+         tooltip = paste0("Week ", week, ": ", team, " against ", opponent)) 
+  
+p <- sched_upcoming %>%
+  ggplot(aes(x = fct_reorder(Person, -avg_sos), y = Proj.W, text = tooltip)) +
+  geom_jitter(aes(color = factor(Round)), size = 2, width = 0.1) +
+  geom_boxplot(fill = NA, color = "grey80") +
+  geom_text(aes(y = min(sched_upcoming$Proj.W) - 1, label = self_games), size = 3) +
+  coord_flip() +
+  labs(x  = "", y = "Opponent projected wins") +
+  ggtitle(paste0("Strength of schedule over next ", length(unique(sched_upcoming$week)), " weeks")) +
+  scale_colour_manual(name = "Team #", values = c("1", "2", "3")) +
+  annotate("text", x= 0.5 , y= min(sched_upcoming$Proj.W) - 1, label= "Self-games", size = 3, vjust = 0) +
+  theme_minimal()
+
+w <- ggplotly(p, tooltip = "tooltip")
+
+w %>%
+  style(hoverinfo = "skip", traces = 4)
+
+
+```
+
 
 ## Draft Analysis
 
